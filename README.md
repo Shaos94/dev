@@ -1,58 +1,97 @@
-# mcpassiveetfvstrader — v3
+# Domande Laterali
 
-Single-page app didattica (React/Vite/TypeScript/Recharts) che confronta investimento
-passivo in ETF e trading attivo con una simulazione Monte Carlo appaiata e fiscalità italiana.
+Una single-page app editoriale che raccoglie e presenta i progetti pubblicati nelle repository GitHub di Shaos94.
 
-URL: `https://shaos94.github.io/mcpassiveetfvstrader/`
+## Obiettivo
 
-## Cosa cambia nella v3
+Il sito non è un semplice elenco di link: ogni progetto viene introdotto attraverso una domanda, una sintesi e il principale punto emerso dall'analisi.
 
-**Struttura a percorso guidato** invece che dashboard: (1) scegli che trader sei →
-(2) vedi cosa succede → (3) vedi da dove nasce il divario → (4) vedi quanto dovresti
-essere bravo per ribaltarlo → (5) regola tutti i parametri.
+## Progetti inclusi
 
-**Novità principali:**
-- **Selettore di profilo interattivo**: i tre profili empirici (Retail medio / Trader
-  bravo / Top 1%) sono l'interazione centrale; selezionarne uno ricalcola tutta la pagina.
-- **Waterfall del divario**: il gap mediano ETF→trading scomposto in tre cause —
-  drag di costi+fisco, effetto skill, effetto abbandono — sugli stessi mercati simulati.
-- **Architettura modulare**: motore in `src/simulation/` (engine, analysis, presets, rng,
-  types), componenti in `src/components/`, `App.tsx` come orchestratore.
+- CO₂ e attività di intrattenimento
+- ETF passivo vs trading attivo
 
-**Scelte di modello dichiarate:**
-- Paired Monte Carlo: stesso seed di mercato per tutte le strategie (requisito).
-- Innovazioni t-Student (ν=5) di default per code realistiche (Cont 2001).
-- Crisi manuale **OFF di default**: con le code pesanti attive il rischio estremo è già
-  nel modello; tenerla accesa di default conterebbe il tail risk due volte.
-- Net alpha dei profili ancorato alla letteratura: −3% (retail medio, Barber & Odean 2000),
-  +1% (top 10–15%), +4% (top 1%, Barber et al. 2014).
-- Survival: chi abbandona in drawdown profondo migra su ETF; tassazione realizzata al quit,
-  differita sul guadagno successivo. Le minusvalenze residue (redditi diversi) non
-  compensano i guadagni ETF (redditi di capitale), come nella realtà.
-- Fiscalità italiana: 26% capital gain, compensazione minusvalenze FIFO 4 anni per il
-  trading (art. 68 TUIR), differimento per ETF ad accumulazione, IVAFE opzionale.
+Il catalogo si aggiorna in `src/data/projects.ts`.
 
-## Sviluppo
+## Stack
+
+- React
+- TypeScript
+- Vite
+- CSS semplice
+- GitHub Pages
+- GitHub Actions
+
+Nessun backend, database o runtime server.
+
+## Sviluppo locale
 
 ```bash
 npm install
-npm run dev    # localhost:5173
-npm run build  # produzione in dist/
+npm run dev
+npm run build
+npm run preview
 ```
 
-## Deploy
+## Deploy attuale
 
-Push su `main` → GitHub Actions pubblica su Pages. Non rimuovere
-`base: '/mcpassiveetfvstrader/'` da `vite.config.ts`.
+Questa prima versione è sviluppata nella repository `Shaos94/dev` sulla branch:
 
-## Limiti noti (onestà metodologica)
+```text
+agent/domande-laterali-hub
+```
 
-- La calibrazione della funzione di abbandono (soglie 35–45% di drawdown, hazard mensile
-  max 12%) è indicativa, non stimata formalmente dai microdati di Barber et al. 2014.
-- t-Student i.i.d. non modella il volatility clustering (GARCH): accettabile su
-  orizzonti ≥5 anni, ottimista sulle code per orizzonti brevi.
-- Fiscalità semplificata: non copre ETF non armonizzati, PIR, Tobin tax per titolo.
-- Letteratura di riferimento prevalentemente USA/Taiwan: trasferibilità al
-  retail italiano plausibile ma non verificata su microdati locali.
+Finché rimane in questa repository, `vite.config.ts` deve contenere:
 
-Strumento didattico: non è una previsione né un consiglio finanziario.
+```ts
+base: '/dev/'
+```
+
+URL previsto dopo il merge e l'attivazione di GitHub Pages:
+
+```text
+https://shaos94.github.io/dev/
+```
+
+## Destinazione consigliata
+
+Quando verrà creata la repository definitiva `Shaos94/Shaos94.github.io`, copiare il progetto e modificare:
+
+```ts
+base: '/'
+```
+
+Il sito principale sarà quindi pubblicato su:
+
+```text
+https://shaos94.github.io/
+```
+
+## Aggiungere un progetto
+
+Aggiungere un oggetto all'array `projects` in `src/data/projects.ts`, compilando:
+
+- domanda;
+- sintesi;
+- risultato principale;
+- categoria;
+- formato;
+- URL del sito;
+- URL della repository.
+
+## Verifiche obbligatorie
+
+```text
+[ ] npm install funziona
+[ ] npm run build funziona
+[ ] dist viene generata
+[ ] vite.config.ts usa il base della repository reale
+[ ] deploy.yml pubblica ./dist
+[ ] GitHub Pages usa GitHub Actions
+[ ] tutti i link ai progetti funzionano
+[ ] layout mobile leggibile
+[ ] navigazione da tastiera funzionante
+[ ] nessun elemento blocca i click
+```
+
+Consultare `HANDOVER.md` per continuare il lavoro in una nuova chat o in un progetto ChatGPT dedicato.
