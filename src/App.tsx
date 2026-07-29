@@ -1,347 +1,200 @@
-import React, { useMemo, useState } from "react";
-import { simulate } from "./simulation/engine";
-import {
-  buildEtfSpec,
-  pairedWinRate,
-  requiredNetAlpha,
-  waterfallDecomposition,
-  type SimBundle,
-} from "./simulation/analysis";
-import { MARKET_SEED, PROFILES, TERMS, type ProfilePreset } from "./simulation/presets";
-import type { TraderSpec } from "./simulation/types";
-import {
-  ActHeader,
-  DotPill,
-  MiniLegend,
-  NumberField,
-  ProfileSelector,
-  RarityCard,
-  StatCard,
-  SurfaceCard,
-  TermPills,
-  THEME,
-  ToggleRow,
-  fmtEUR,
-  fmtPct,
-  fmtPp,
-} from "./components/ui";
-import { AlphaRequiredChart, WaterfallChart, WealthChart } from "./components/charts";
+import { useMemo, useState } from 'react'
+import { projects, type Project } from './data/projects'
 
-const WIN_TARGETS = [50, 60, 70];
+const ALL_CATEGORIES = 'Tutte'
+type CategoryFilter = typeof ALL_CATEGORIES | Project['category']
+
+function ProjectCard({ project }: { project: Project }) {
+  return (
+    <article className="project-card">
+      <div className="project-card__meta">
+        <span>{project.category}</span>
+        <span aria-hidden="true">·</span>
+        <span>{project.format}</span>
+        <span className="status-badge">{project.status}</span>
+      </div>
+
+      <h3>{project.question}</h3>
+      <p className="project-card__summary">{project.summary}</p>
+
+      <div className="project-card__takeaway">
+        <span className="takeaway-label">Il punto</span>
+        <p>{project.takeaway}</p>
+      </div>
+
+      <div className="project-card__actions">
+        <a
+          className="button button--primary"
+          href={project.siteUrl}
+          target="_blank"
+          rel="noreferrer"
+          aria-label={`Apri il progetto: ${project.question}`}
+        >
+          Esplora il progetto <span aria-hidden="true">↗</span>
+        </a>
+        <a
+          className="text-link"
+          href={project.repositoryUrl}
+          target="_blank"
+          rel="noreferrer"
+          aria-label={`Apri la repository GitHub di: ${project.question}`}
+        >
+          Vedi il codice
+        </a>
+      </div>
+    </article>
+  )
+}
 
 export default function App() {
-  // --- Atto 1: profilo ---
-  const [selectedKey, setSelectedKey] = useState<ProfilePreset["key"]>("retail");
+  const [query, setQuery] = useState('')
+  const [activeCategory, setActiveCategory] = useState<CategoryFilter>(ALL_CATEGORIES)
 
-  // --- Atto 5: parametri ---
-  const [initialCapital, setInitialCapital] = useState(100000);
-  const [monthlyContribution, setMonthlyContribution] = useState(400);
-  const [years, setYears] = useState(10);
-  const [numPaths, setNumPaths] = useState(1500);
+  const categories = useMemo<CategoryFilter[]>(
+    () => [ALL_CATEGORIES, ...Array.from(new Set(projects.map((project) => project.category)))],
+    [],
+  )
 
-  const [marketGross, setMarketGross] = useState(7);
-  const [marketVol, setMarketVol] = useState(16);
-  const [fatTails, setFatTails] = useState(true);
-  const [crashEnabled, setCrashEnabled] = useState(false); // OFF: le code pesanti coprono già il tail risk
-  const [crashYear, setCrashYear] = useState(2);
-  const [crashShock, setCrashShock] = useState(-30);
+  const filteredProjects = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase('it')
 
-  const [etfTER, setEtfTER] = useState(0.2);
-  const [etfOther, setEtfOther] = useState(0.05);
-  const [capTax, setCapTax] = useState(26);
-  const [ivafe, setIvafe] = useState(0.2);
-  const [applyIvafeEtf, setApplyIvafeEtf] = useState(false);
-  const [applyIvafeTrading, setApplyIvafeTrading] = useState(false);
-  const [useLossCarry, setUseLossCarry] = useState(true);
+    return projects.filter((project) => {
+      const matchesCategory =
+        activeCategory === ALL_CATEGORIES || project.category === activeCategory
+      const searchableText = [
+        project.question,
+        project.summary,
+        project.takeaway,
+        project.category,
+        project.format,
+      ]
+        .join(' ')
+        .toLocaleLowerCase('it')
 
-  const [extraVol, setExtraVol] = useState(8);
-  const [survivalMaster, setSurvivalMaster] = useState(true);
-
-  const [selectedTerm, setSelectedTerm] = useState("alpha");
-
-  const profile = PROFILES.find((p) => p.key === selectedKey) ?? PROFILES[0];
-
-  // -------------------------------------------------------------------------
-  // Memo 1 — benchmark ETF: dipende solo dai parametri, NON dal profilo scelto.
-  // Cliccare un profilo non lo ricalcola.
-  // -------------------------------------------------------------------------
-  const bundle: SimBundle = useMemo(
-    () => ({
-      common: { numPaths, years, initialCapital, monthlyContribution, marketSeed: MARKET_SEED },
-      market: { annualGrossReturnPct: marketGross, annualVolPct: marketVol, fatTails },
-      crash: { enabled: crashEnabled, year: crashYear, shockPct: crashShock },
-      fiscal: { capGainsTaxPct: capTax, ivafePct: ivafe },
-    }),
-    [numPaths, years, initialCapital, monthlyContribution, marketGross, marketVol, fatTails, crashEnabled, crashYear, crashShock, capTax, ivafe]
-  );
-
-  const etfResult = useMemo(
-    () => simulate(bundle.common, bundle.market, bundle.crash, bundle.fiscal, buildEtfSpec(etfTER + etfOther, applyIvafeEtf)),
-    [bundle, etfTER, etfOther, applyIvafeEtf]
-  );
-
-  // -------------------------------------------------------------------------
-  // Memo 2 — trader del profilo selezionato + waterfall (3 controfattuali).
-  // -------------------------------------------------------------------------
-  const traderSpec: TraderSpec = useMemo(
-    () => ({
-      kind: "trader",
-      grossExtraPct: profile.alphaPct + profile.costPct,
-      annualCostPct: profile.costPct,
-      extraVolPct: extraVol,
-      applyIvafe: applyIvafeTrading,
-      useLossCarry,
-      survival: { enabled: survivalMaster && profile.useSurvival, meanDd: profile.survivalMeanDd },
-    }),
-    [profile, extraVol, applyIvafeTrading, useLossCarry, survivalMaster]
-  );
-
-  const decomposition = useMemo(
-    () => waterfallDecomposition(bundle, etfResult, traderSpec),
-    [bundle, etfResult, traderSpec]
-  );
-
-  const traderResult = decomposition.traderResult;
-  const winRate = useMemo(
-    () => pairedWinRate(traderResult.finalWealth, etfResult.finalWealth),
-    [traderResult, etfResult]
-  );
-
-  // -------------------------------------------------------------------------
-  // Memo 3 — net alpha richiesto: bisezione su sentieri ridotti (quickPaths).
-  // Il benchmark ridotto è in un memo a sé: non dipende dal profilo selezionato.
-  // -------------------------------------------------------------------------
-  const quickBundle: SimBundle = useMemo(
-    () => ({ ...bundle, common: { ...bundle.common, numPaths: Math.max(500, Math.round(bundle.common.numPaths * 0.4)) } }),
-    [bundle]
-  );
-
-  const quickEtfWealth = useMemo(
-    () =>
-      simulate(quickBundle.common, quickBundle.market, quickBundle.crash, quickBundle.fiscal, buildEtfSpec(etfTER + etfOther, applyIvafeEtf))
-        .finalWealth,
-    [quickBundle, etfTER, etfOther, applyIvafeEtf]
-  );
-
-  const alphaRequired = useMemo(
-    () =>
-      WIN_TARGETS.map((target) => ({
-        target: `${target}%`,
-        alpha: requiredNetAlpha(quickBundle, quickEtfWealth, traderSpec, target),
-      })),
-    [quickBundle, quickEtfWealth, traderSpec]
-  );
-
-  const alpha50 = alphaRequired[0]?.alpha ?? null;
-  const medianGap = traderResult.finalStats.p50 - etfResult.finalStats.p50;
+      return matchesCategory && searchableText.includes(normalizedQuery)
+    })
+  }, [activeCategory, query])
 
   return (
-    <div className="page">
-      <div className="app-shell">
-        {/* ------------------------------------------------------------ Hero */}
-        <header className="hero">
-          <h1 className="hero-title">Quanto devi essere bravo perché il trading batta l'ETF?</h1>
-          <p className="hero-lead">
-            Un percorso in quattro atti su migliaia di mercati simulati: scegli che trader pensi di essere,
-            guarda cosa succede al tuo patrimonio, scopri da dove nasce il divario e quanto alpha ti servirebbe
-            per ribaltarlo. Stesso capitale, stessi mercati, fiscalità italiana.
-          </p>
-          <div className="pill-row">
-            <DotPill color={THEME.etf}>Confronto appaiato</DotPill>
-            <DotPill color={THEME.strong}>Code pesanti t-Student</DotPill>
-            <DotPill color={THEME.skilled}>Fiscalità italiana (26%, art. 68 TUIR)</DotPill>
-          </div>
-        </header>
+    <div className="site-shell">
+      <header className="site-header">
+        <a className="brand" href="#top" aria-label="Domande Laterali, torna all'inizio">
+          <span className="brand-mark" aria-hidden="true">?</span>
+          <span>Domande Laterali</span>
+        </a>
+        <nav aria-label="Navigazione principale">
+          <a href="#progetti">Progetti</a>
+          <a href="#metodo">Metodo</a>
+          <a href="https://github.com/Shaos94" target="_blank" rel="noreferrer">
+            GitHub <span aria-hidden="true">↗</span>
+          </a>
+        </nav>
+      </header>
 
-        {/* ---------------------------------------------------------- Atto 1 */}
-        <SurfaceCard>
-          <ActHeader
-            act={1}
-            title="Che trader sei?"
-            lead="Tre profili ancorati alla letteratura empirica. Selezionane uno: tutta la pagina si ricalcola sui suoi numeri."
-          />
-          <ProfileSelector profiles={PROFILES} selectedKey={selectedKey} onSelect={setSelectedKey} />
-          <RarityCard profile={profile} />
-        </SurfaceCard>
-
-        {/* ---------------------------------------------------------- Atto 2 */}
-        <SurfaceCard>
-          <ActHeader
-            act={2}
-            title="Cosa succede al tuo patrimonio"
-            lead={`${fmtEUR(initialCapital)} iniziali più ${fmtEUR(monthlyContribution)} al mese per ${years} anni, vissuti sugli stessi ${numPaths.toLocaleString("it-IT")} mercati simulati.`}
-          />
-          <div className="stat-grid">
-            <StatCard
-              label="Mediana finale · trading"
-              value={fmtEUR(traderResult.finalStats.p50)}
-              sub={`contro ${fmtEUR(etfResult.finalStats.p50)} dell'ETF`}
-              accent={profile.color}
-            />
-            <StatCard
-              label="Batte l'ETF in"
-              value={fmtPct(winRate, 0)}
-              sub="dei mercati appaiati"
-              accent={winRate >= 50 ? undefined : THEME.muted}
-            />
-            <StatCard
-              label="Drawdown mediano"
-              value={fmtPct(traderResult.drawdownStats.p50, 0)}
-              sub={`ETF: ${fmtPct(etfResult.drawdownStats.p50, 0)}`}
-            />
-            <StatCard
-              label="Abbandona il trading"
-              value={fmtPct(traderResult.quitShare * 100, 0)}
-              sub={traderSpec.survival.enabled ? "dei sentieri simulati" : "funzione di abbandono disattivata"}
-            />
-          </div>
-          <div className="legend-row">
-            <MiniLegend color={THEME.etf} title="ETF passivo" text="Accumulazione, tassa differita alla fine." />
-            <MiniLegend color={profile.color} title={profile.name} text="Tassazione annuale, costi e comportamento del profilo." />
-          </div>
-          <WealthChart etf={etfResult} trader={traderResult} traderColor={profile.color} traderName={profile.name} />
-          <p className="chart-footnote">
-            Linee: patrimonio mediano. Banda: dal 5° al 95° percentile del trader. I valori annuali sono al lordo
-            della tassa differita, che per ETF e post-abbandono viene applicata solo al risultato finale.
-          </p>
-        </SurfaceCard>
-
-        {/* ---------------------------------------------------------- Atto 3 */}
-        <SurfaceCard>
-          <ActHeader
-            act={3}
-            title="Da dove nasce il divario"
-            lead={`Il gap mediano di ${fmtEUR(Math.abs(medianGap))} ${medianGap >= 0 ? "a favore del" : "a sfavore del"} trading, scomposto nelle sue cause sugli stessi mercati.`}
-          />
-          <div className="legend-row">
-            <MiniLegend color={THEME.bad} title="Contributo negativo" text="Riduce il patrimonio rispetto al passo precedente." />
-            <MiniLegend color={THEME.good} title="Contributo positivo" text="Aumenta il patrimonio rispetto al passo precedente." />
-          </div>
-          <WaterfallChart steps={decomposition.steps} traderColor={profile.color} />
-          <p className="chart-footnote">
-            Tre cause in sequenza: il drag di costi e fisco (stessi mercati, zero skill), l'effetto della skill lorda
-            del profilo, e — se attivo — l'effetto dell'abbandono in drawdown con migrazione su ETF.
-            {!traderSpec.survival.enabled
-              ? " Per questo profilo la funzione di abbandono non è attiva, quindi il passo non compare."
-              : ""}
-          </p>
-        </SurfaceCard>
-
-        {/* ---------------------------------------------------------- Atto 4 */}
-        <SurfaceCard>
-          <ActHeader
-            act={4}
-            title="Quanto dovresti essere bravo per ribaltarlo"
-            lead={
-              alpha50 == null
-                ? "Con questi parametri, nemmeno +15 punti di net alpha bastano a battere l'ETF in un mercato su due."
-                : `Per battere l'ETF in un mercato su due servono almeno ${fmtPp(alpha50)} di net alpha. Il tuo profilo ne ha ${fmtPp(profile.alphaPct)}.`
-            }
-          />
-          <AlphaRequiredChart data={alphaRequired} currentAlpha={profile.alphaPct} traderColor={profile.color} />
-          <p className="chart-footnote">
-            Net alpha annuo (al netto dei costi) necessario perché il tuo profilo — con i suoi costi, la sua volatilità
-            extra e il suo comportamento — batta l'ETF nella quota indicata di mercati appaiati.
-          </p>
-        </SurfaceCard>
-
-        {/* ---------------------------------------------------------- Atto 5 */}
-        <SurfaceCard>
-          <ActHeader
-            act={5}
-            title="Regola le ipotesi"
-            lead="Tutti i parametri del modello. Ogni modifica ricalcola l'intero percorso sugli stessi semi di mercato."
-          />
-          <div className="params-grid">
-            <div className="param-box">
-              <div className="param-title">Capitale e orizzonte</div>
-              <div className="param-fields">
-                <NumberField label="Capitale iniziale" suffix="€" value={initialCapital} setValue={setInitialCapital} step={1000} min={1000} />
-                <NumberField label="Versamento mensile" suffix="€" value={monthlyContribution} setValue={setMonthlyContribution} step={50} min={0} />
-                <NumberField label="Orizzonte" suffix="anni" value={years} setValue={setYears} step={1} min={1} max={40} />
-                <label className="field">
-                  <span className="field-label">Sentieri Monte Carlo: {numPaths.toLocaleString("it-IT")}</span>
-                  <input
-                    className="range-input"
-                    type="range"
-                    min={500}
-                    max={4000}
-                    step={250}
-                    value={numPaths}
-                    onChange={(e) => setNumPaths(Number(e.target.value))}
-                  />
-                </label>
-              </div>
-            </div>
-
-            <div className="param-box">
-              <div className="param-title">Mercato</div>
-              <div className="param-fields">
-                <NumberField label="Rendimento lordo annuo" suffix="%" value={marketGross} setValue={setMarketGross} step={0.1} />
-                <NumberField label="Volatilità annua" suffix="%" value={marketVol} setValue={setMarketVol} step={0.5} min={1} />
-                <ToggleRow label="Code pesanti (t-Student ν=5)" checked={fatTails} onChange={setFatTails} />
-                <ToggleRow label="Crisi manuale" checked={crashEnabled} onChange={setCrashEnabled} />
-                {crashEnabled ? (
-                  <>
-                    <NumberField label="Anno della crisi" value={crashYear} setValue={setCrashYear} step={1} min={1} max={years} />
-                    <NumberField label="Shock della crisi" suffix="%" value={crashShock} setValue={setCrashShock} step={1} min={-80} max={0} />
-                  </>
-                ) : (
-                  <p className="param-note">
-                    OFF di default: con le code pesanti attive il rischio estremo è già nel modello; attivare
-                    entrambe conta il tail risk due volte.
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <div className="param-box">
-              <div className="param-title">Fiscalità e costi</div>
-              <div className="param-fields">
-                <NumberField label="Capital gain" suffix="%" value={capTax} setValue={setCapTax} step={0.5} min={0} />
-                <NumberField label="TER ETF" suffix="%" value={etfTER} setValue={setEtfTER} step={0.01} min={0} />
-                <NumberField label="Altri costi ETF" suffix="%" value={etfOther} setValue={setEtfOther} step={0.01} min={0} />
-                <ToggleRow label="Riporto minusvalenze (4 anni)" checked={useLossCarry} onChange={setUseLossCarry} />
-                <NumberField label="IVAFE" suffix="%" value={ivafe} setValue={setIvafe} step={0.01} min={0} />
-                <ToggleRow label="IVAFE su ETF" checked={applyIvafeEtf} onChange={setApplyIvafeEtf} />
-                <ToggleRow label="IVAFE su trading" checked={applyIvafeTrading} onChange={setApplyIvafeTrading} />
-              </div>
-            </div>
-
-            <div className="param-box">
-              <div className="param-title">Comportamenti umani</div>
-              <div className="param-fields">
-                <NumberField label="Volatilità extra del trader" suffix="% annuo" value={extraVol} setValue={setExtraVol} step={1} min={0} max={40} />
-                <ToggleRow label="Funzione di abbandono" checked={survivalMaster} onChange={setSurvivalMaster} />
-                <p className="param-note">
-                  Se attiva (e prevista dal profilo), in drawdown profondo il trader può mollare: realizza il
-                  fiscale e migra su un ETF a basso costo con il capitale residuo. Soglia del profilo corrente:
-                  ~{Math.round(profile.survivalMeanDd * 100)}% di drawdown.
-                </p>
-              </div>
+      <main id="top">
+        <section className="hero" aria-labelledby="hero-title">
+          <div className="hero__copy">
+            <p className="eyebrow">Esperimenti indipendenti, dati verificabili</p>
+            <h1 id="hero-title">Domande strane. Risposte che si possono controllare.</h1>
+            <p className="hero__lead">
+              Una raccolta di calcolatori, simulazioni e approfondimenti costruiti per
+              capire meglio problemi che sembrano semplici solo finché non si guardano i dati.
+            </p>
+            <div className="hero__actions">
+              <a className="button button--primary" href="#progetti">Esplora i progetti</a>
+              <a className="text-link" href="#metodo">Come vengono costruiti</a>
             </div>
           </div>
-        </SurfaceCard>
+          <div className="hero__aside" aria-label="Statistiche della raccolta">
+            <div>
+              <strong>{projects.length}</strong>
+              <span>progetti pubblicati</span>
+            </div>
+            <div>
+              <strong>{categories.length - 1}</strong>
+              <span>campi esplorati</span>
+            </div>
+            <p>Una domanda alla volta, con ipotesi e limiti dichiarati.</p>
+          </div>
+        </section>
 
-        {/* ------------------------------------------------------ Dizionario */}
-        <SurfaceCard title="Dizionario veloce" description="I termini del modello, senza giri di parole.">
-          <TermPills terms={TERMS} selected={selectedTerm} onSelect={setSelectedTerm} />
-        </SurfaceCard>
+        <section className="projects-section" id="progetti" aria-labelledby="projects-title">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">La raccolta</p>
+              <h2 id="projects-title">Scegli una domanda da esplorare</h2>
+            </div>
+            <p>{filteredProjects.length} risultati</p>
+          </div>
 
-        {/* ---------------------------------------------------------- Footer */}
-        <footer className="footer">
-          <div className="footer-title">Limiti noti (onestà metodologica)</div>
-          <ul className="footer-list">
-            <li>La calibrazione della funzione di abbandono (soglie 35–45% di drawdown) è indicativa, non stimata formalmente dai microdati di Barber et al. 2014.</li>
-            <li>Le innovazioni t-Student i.i.d. non modellano il volatility clustering (GARCH): accettabile su orizzonti ≥5 anni, ottimista sulle code per orizzonti brevi.</li>
-            <li>Fiscalità semplificata: non copre ETF non armonizzati, PIR, Tobin tax per titolo.</li>
-            <li>Letteratura di riferimento prevalentemente USA/Taiwan: trasferibilità al retail italiano plausibile ma non verificata su microdati locali.</li>
-          </ul>
-          <p className="footer-disclaimer">
-            Strumento didattico: simula scenari sotto ipotesi esplicite. Non è una previsione né un consiglio finanziario.
-          </p>
-        </footer>
-      </div>
+          <div className="project-tools">
+            <label className="search-field">
+              <span className="sr-only">Cerca nei progetti</span>
+              <span aria-hidden="true">⌕</span>
+              <input
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Cerca una domanda, un tema o uno strumento"
+              />
+            </label>
+
+            <div className="filters" aria-label="Filtra per categoria">
+              {categories.map((category) => (
+                <button
+                  key={category}
+                  type="button"
+                  className={category === activeCategory ? 'filter-button is-active' : 'filter-button'}
+                  onClick={() => setActiveCategory(category)}
+                  aria-pressed={category === activeCategory}
+                >
+                  {category}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {filteredProjects.length > 0 ? (
+            <div className="projects-grid">
+              {filteredProjects.map((project) => (
+                <ProjectCard key={project.id} project={project} />
+              ))}
+            </div>
+          ) : (
+            <div className="empty-state">
+              <h3>Nessun progetto corrisponde alla ricerca.</h3>
+              <p>Prova a rimuovere un filtro o a usare parole più generali.</p>
+              <button
+                type="button"
+                className="button button--secondary"
+                onClick={() => {
+                  setQuery('')
+                  setActiveCategory(ALL_CATEGORIES)
+                }}
+              >
+                Azzera i filtri
+              </button>
+            </div>
+          )}
+        </section>
+
+        <section className="method-section" id="metodo" aria-labelledby="method-title">
+          <div>
+            <p className="eyebrow">Metodo</p>
+            <h2 id="method-title">Non una raccolta di curiosità. Un laboratorio pubblico.</h2>
+          </div>
+          <ol className="method-steps">
+            <li><span>01</span><div><h3>Partire dalla domanda</h3><p>Definire cosa si sta davvero confrontando e quali confini rendono la risposta utile.</p></div></li>
+            <li><span>02</span><div><h3>Rendere visibili le ipotesi</h3><p>Mostrare dati, semplificazioni, intervalli e punti in cui il risultato può cambiare.</p></div></li>
+            <li><span>03</span><div><h3>Lasciare esplorare</h3><p>Trasformare la ricerca in strumenti interattivi, senza nascondere l'incertezza.</p></div></li>
+          </ol>
+        </section>
+      </main>
+
+      <footer className="site-footer">
+        <p><strong>Domande Laterali</strong> — un progetto indipendente di Stefano.</p>
+        <p>Codice e progetti pubblici su <a href="https://github.com/Shaos94" target="_blank" rel="noreferrer">GitHub</a>.</p>
+      </footer>
     </div>
-  );
+  )
 }
